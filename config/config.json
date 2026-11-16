@@ -1,0 +1,57 @@
+{
+  "camera": {
+    "rtsp_url": "rtsp://192.168.144.108",
+    "transport": "tcp",
+    "codec": "h264",
+    "latency_ms": 100,
+    "jpeg_quant": 7,
+    "reconnect_ms": 2000
+  },
+  "mavlink": {
+    "enabled": true,
+    "endpoint": "/dev/ttyUSB0",
+    "baud": 115200,
+    "sys_id": 1,
+    "comp_id": 1,
+    "target_sys": 1,
+    "target_comp": 154
+  },
+  "control": {
+    "loop_hz": 30,
+    "deadband": 0.04,
+    "max_rate": 0.8,
+    "max_accel": 3.0,
+    "ff_gain": 0.3,
+    "kp_yaw": 0.6, "ki_yaw": 0.0, "kd_yaw": 0.1, "invert_yaw": true,
+    "kp_pitch": 0.6, "ki_pitch": 0.0, "kd_pitch": 0.1, "invert_pitch": true,
+    "lost_timeout_ms": 500,
+    "max_yaw_deg": 120,
+    "min_pitch_deg": -90,
+    "max_pitch_deg": 45
+  },
+  "detector": {
+    "enabled": true,
+    "model": "models/yolov5s-640-640.rknn",
+    "labels": "models/coco_80_labels_list.txt",
+    "conf_thresh": 0.5,
+    "nms_thresh": 0.45,
+    "workers": 3,
+    "npu_cores": [0, 1, 2]
+  },
+  "tracker": {
+    "backbone_z": "models/nanotrack_backbone_127.onnx",
+    "backbone": "models/nanotrack_backbone.onnx",
+    "head": "models/nanotrack_head.onnx",
+    "min_score": 0.25
+  },
+  "web": {
+    "bind": "0.0.0.0",
+    "port": 8080,
+    "overlay_hz": 60,
+    "www_dir": "www"
+  },
+  "system": {
+    "cpu_affinity_ai": [4, 5, 6, 7],
+    "cpu_affinity_io": [0, 1, 2, 3]
+  }
+}

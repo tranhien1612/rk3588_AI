@@ -1,0 +1,699 @@
+<!doctype html>
+<html lang="vi">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>Gimbal Vision</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      height: 100%;
+      background: #111;
+      color: #ddd;
+      font: 13px system-ui, -apple-system, sans-serif;
+      overflow: hidden;
+      user-select: none
+    }
+
+    #wrap {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center
+    }
+
+    #stage {
+      position: relative;
+      max-width: 100%;
+      max-height: 100%
+    }
+
+    #vid {
+      display: block;
+      max-width: 100vw;
+      max-height: 100vh;
+      -webkit-user-drag: none;
+      pointer-events: none
+    }
+
+    #ov {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      cursor: crosshair
+    }
+
+    /* Danh sách cột card nhận diện khuôn mặt góc trên bên phải */
+    #face-list {
+      position: fixed;
+      right: 20px;
+      top: 20px;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-height: calc(100vh - 40px);
+      overflow-y: auto;
+      pointer-events: none;
+    }
+
+    #face-list::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    #face-list::-webkit-scrollbar-thumb {
+      background: rgba(56, 189, 248, 0.4);
+      border-radius: 4px;
+    }
+
+    .face-card-item {
+      background: rgba(15, 23, 42, 0.70);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(56, 189, 248, 0.40);
+      border-radius: 12px;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      color: #e2e8f0;
+      min-width: 310px;
+      max-width: 380px;
+      transition: opacity 0.3s ease, transform 0.3s ease;
+    }
+
+    .face-card-item.fade-in {
+      animation: cardAppear 0.25s ease-out;
+    }
+
+    @keyframes cardAppear {
+      from {
+        opacity: 0;
+        transform: translateY(-8px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .face-avatar {
+      width: 80px;
+      height: 80px;
+      border-radius: 10px;
+      object-fit: cover;
+      border: 2px solid #38bdf8;
+      background: #1e293b;
+      flex-shrink: 0;
+    }
+
+    .face-card-item.unmatched .face-avatar {
+      border-color: #94a3b8;
+    }
+
+    .face-info {
+      flex: 1;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .face-name {
+      font-size: 16px;
+      font-weight: 700;
+      color: #38bdf8;
+      margin-bottom: 4px;
+      letter-spacing: 0.3px;
+    }
+
+    .face-card-item.unmatched .face-name {
+      color: #cbd5e1;
+    }
+
+    .face-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 2px;
+    }
+
+    .face-label {
+      color: #94a3b8;
+      font-size: 12px;
+    }
+
+    .face-val {
+      color: #f8fafc;
+      font-weight: 500;
+      font-size: 12px;
+    }
+
+    /* Đèn báo trạng thái cử chỉ góc trên bên trái */
+    #gesture-panel {
+      position: fixed;
+      left: 20px;
+      top: 20px;
+      z-index: 100;
+      pointer-events: auto;
+    }
+
+    .gst-lamp {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(8px);
+      border: 2px solid #64748b;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+      transition: all 0.25s ease;
+      cursor: default;
+    }
+
+    .gst-lamp .gst-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #64748b;
+      transition: all 0.25s ease;
+    }
+
+    /* 1. Tắt: đèn xám */
+    .gst-lamp.off {
+      border-color: rgba(148, 163, 184, 0.35);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
+
+    .gst-lamp.off .gst-dot {
+      background: #64748b;
+      box-shadow: none;
+    }
+
+    /* 2. Bật: đèn xanh */
+    .gst-lamp.on {
+      border-color: rgba(34, 197, 94, 0.85);
+      box-shadow: 0 0 16px rgba(34, 197, 94, 0.45);
+    }
+
+    .gst-lamp.on .gst-dot {
+      background: #22c55e;
+      box-shadow: 0 0 8px #22c55e, 0 0 16px rgba(34, 197, 94, 0.8);
+    }
+
+    /* 3. Khi đang trong quá trình đếm thời gian xòe bàn tay: đèn vàng */
+    .gst-lamp.counting {
+      border-color: rgba(234, 179, 8, 0.9);
+      box-shadow: 0 0 16px rgba(234, 179, 8, 0.55);
+      animation: lampPulse 0.5s infinite alternate ease-in-out;
+    }
+
+    .gst-lamp.counting .gst-dot {
+      background: #eab308;
+      box-shadow: 0 0 8px #eab308, 0 0 16px rgba(234, 179, 8, 0.9);
+    }
+
+    @keyframes lampPulse {
+      from {
+        transform: scale(0.95);
+        opacity: 0.85;
+      }
+
+      to {
+        transform: scale(1.08);
+        opacity: 1;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="wrap">
+    <div id="stage"><img id="vid" src="/video" alt=""><canvas id="ov"></canvas></div>
+  </div>
+
+  <!-- Danh sách cột thông tin khuôn mặt góc trên bên phải -->
+  <div id="face-list"></div>
+
+  <!-- Đèn báo trạng thái điều khiển cử chỉ góc trên bên trái -->
+  <div id="gesture-panel">
+    <div class="gst-lamp off" id="gst-indicator" title="Cử chỉ: TẮT (Xám: Tắt | Xanh: Bật | Vàng: Đang đếm xòe tay)">
+      <span class="gst-dot"></span>
+    </div>
+  </div>
+
+  <script>
+    const vid = document.getElementById('vid'), cv = document.getElementById('ov');
+    const faceListEl = document.getElementById('face-list');
+
+    // Phần tử Đèn báo trạng thái cử chỉ
+    const gstIndicator = document.getElementById('gst-indicator');
+    gstIndicator.addEventListener('click', () => {
+      if (last && last.gesture) {
+        last.gesture.mode = 'OFF';
+        last.gesture.gesture = 'NONE';
+        last.gesture.hold_sec = 0;
+        last.gesture.progress = 0;
+        updateGestureUI(last.gesture);
+      }
+      post('/api/space');
+    });
+
+    const HAND_CONNECTIONS = [
+      [0, 1], [1, 2], [2, 3], [3, 4],
+      [0, 5], [5, 6], [6, 7], [7, 8],
+      [0, 9], [9, 10], [10, 11], [11, 12],
+      [0, 13], [13, 14], [14, 15], [15, 16],
+      [0, 17], [17, 18], [18, 19], [19, 20],
+      [5, 9], [9, 13], [13, 17]
+    ];
+
+    const ctx = cv.getContext('2d');
+    let last = null;
+
+    // Quản lý kéo thả chuột để vẽ bounding box
+    let isDrawing = false;
+    let startX = 0, startY = 0, currX = 0, currY = 0;
+
+    let renderRequested = false;
+    function requestRender() {
+      if (!renderRequested) {
+        renderRequested = true;
+        requestAnimationFrame(() => {
+          renderRequested = false;
+          draw();
+        });
+      }
+    }
+
+    function fit() {
+      const w = vid.clientWidth, h = vid.clientHeight;
+      if (w > 0 && h > 0 && (cv.width !== w || cv.height !== h)) {
+        cv.width = w;
+        cv.height = h;
+      }
+      requestRender();
+    }
+    new ResizeObserver(fit).observe(vid);
+
+    function draw() {
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      if (!cv.width || !cv.height) return;
+
+      // 1. Dấu cộng (+) màu trắng ở tâm khung hình để xác định tâm
+      const cx = cv.width * 0.5;
+      const cy = cv.height * 0.5;
+      const cr = 12;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(cx - cr, cy); ctx.lineTo(cx + cr, cy);
+      ctx.moveTo(cx, cy - cr); ctx.lineTo(cx, cy + cr);
+      ctx.stroke();
+
+      if (!last || !last.w) return;
+
+      const sx = cv.width / last.w;
+      const sy = cv.height / last.h;
+
+      // 2. Vẽ các box Object Detection từ YOLO: Màu TRẮNG, NÉT ĐỨT (không màu ngẫu nhiên, không text)
+      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = '#ffffff';
+      ctx.setLineDash([5, 5]);
+      for (const d of last.det || []) {
+        const b = d.b;
+        const x = b[0] * sx, y = b[1] * sy, w = (b[2] - b[0]) * sx, h = (b[3] - b[1]) * sy;
+        ctx.strokeRect(x, y, w, h);
+      }
+      ctx.setLineDash([]);
+
+      // 3. Vẽ box Tracking: Màu TRẮNG, CHỈ VẼ 4 GÓC (không viền toàn bộ, không text, không tâm)
+      // Không vẽ box khi đang tracking theo tâm bàn tay
+      const t = last.trk;
+      if (t && t.b && !t.is_hand && t.state !== 'HAND_TRACKING' && (t.state === 'TRACKING' || t.state === 'LOW_CONF')) {
+        const b = t.b;
+        const tx = cv.width / t.tw;
+        const ty = cv.height / t.th;
+        const x = b[0] * tx, y = b[1] * ty, w = (b[2] - b[0]) * tx, h = (b[3] - b[1]) * ty;
+
+        const cl = Math.max(8, Math.min(22, Math.min(w, h) * 0.25));
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        // Top-Left
+        ctx.moveTo(x, y + cl); ctx.lineTo(x, y); ctx.lineTo(x + cl, y);
+        // Top-Right
+        ctx.moveTo(x + w - cl, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + cl);
+        // Bottom-Left
+        ctx.moveTo(x, y + h - cl); ctx.lineTo(x, y + h); ctx.lineTo(x + cl, y + h);
+        // Bottom-Right
+        ctx.moveTo(x + w - cl, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - cl);
+        ctx.stroke();
+      }
+
+      // 4. Vẽ box khi người dùng đang khoanh vùng (kéo thả chuột): NÉT ĐỨT, MÀU XANH NƯỚC BIỂN NHẠT
+      if (isDrawing) {
+        const rx = Math.min(startX, currX);
+        const ry = Math.min(startY, currY);
+        const rw = Math.abs(currX - startX);
+        const rh = Math.abs(currY - startY);
+
+        ctx.strokeStyle = '#38bdf8'; // Xanh nước biển nhạt
+        ctx.lineWidth = 1.8;
+        ctx.setLineDash([5, 5]);
+        ctx.strokeRect(rx, ry, rw, rh);
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.15)';
+        ctx.fillRect(rx, ry, rw, rh);
+      }
+
+      // 5. Box các khuôn mặt phát hiện được (cả trong CSDL và không có trong CSDL)
+      if (last.face) {
+        const faceList = last.face.faces || (last.face.box ? [last.face] : []);
+        for (const fb_info of faceList) {
+          if (fb_info.box) {
+            const fb = fb_info.box;
+            const fx = fb[0] * sx, fy = fb[1] * sy, fw = (fb[2] - fb[0]) * sx, fh = (fb[3] - fb[1]) * sy;
+            const isMatch = fb_info.matched;
+
+            ctx.strokeStyle = isMatch ? '#38bdf8' : '#ffffff';
+            ctx.lineWidth = 1.8;
+            ctx.setLineDash([4, 4]);
+            ctx.strokeRect(fx, fy, fw, fh);
+            ctx.setLineDash([]);
+          }
+        }
+      }
+
+      // 6. Vẽ 21 điểm xương tay: CHỈ vẽ khi chế độ điều khiển bằng cử chỉ đang MỞ (g.mode === 'ON')
+      // Bám trực tiếp theo MediaPipe thời gian thực, không áp filter trễ hay threshold gián đoạn
+      const g = last.gesture;
+      if (g && g.mode === 'ON' && Array.isArray(g.landmarks) && g.landmarks.length === 21) {
+        const pts = g.landmarks.map(p => ({
+          x: p[0] * cv.width,
+          y: p[1] * cv.height
+        }));
+
+        // Đường nối các khớp xương bàn tay
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.85)';
+        ctx.lineWidth = 2.0;
+        for (const [i, j] of HAND_CONNECTIONS) {
+          ctx.beginPath();
+          ctx.moveTo(pts[i].x, pts[i].y);
+          ctx.lineTo(pts[j].x, pts[j].y);
+          ctx.stroke();
+        }
+
+        // Vẽ 21 khớp tròn
+        for (let k = 0; k < 21; k++) {
+          ctx.beginPath();
+          const isCenter = (k === 9);
+          ctx.arc(pts[k].x, pts[k].y, (isCenter && g.gesture === 'FIST') ? 5 : 3, 0, Math.PI * 2);
+          ctx.fillStyle = (isCenter && g.gesture === 'FIST') ? '#38bdf8' : '#ffffff';
+          ctx.fill();
+        }
+      }
+    }
+
+    // Cập nhật đèn báo trạng thái cử chỉ:
+    // - Tắt: đèn xám (.off)
+    // - Bật: đèn xanh (.on)
+    // - Đang trong quá trình đếm thời gian xòe bàn tay: đèn vàng (.counting)
+    function updateGestureUI(g) {
+      if (!g) {
+        gstIndicator.className = 'gst-lamp off';
+        gstIndicator.title = 'Cử chỉ: TẮT (Xòe tay 2s để bật)';
+        cv.style.cursor = 'crosshair';
+        return;
+      }
+
+      const isCountingPalm = (g.gesture === 'OPEN_PALM' && (g.progress > 0 || g.hold_sec > 0));
+      const isModeOn = (g.mode === 'ON');
+
+      if (isCountingPalm) {
+        // Đang trong quá trình đếm thời gian xòe bàn tay: ĐÈN VÀNG
+        gstIndicator.className = 'gst-lamp counting';
+        gstIndicator.title = `Đang đếm xòe tay: ${(g.hold_sec || 0).toFixed(1)}s / ${(g.hold_target || 2.0).toFixed(1)}s (${isModeOn ? 'để Tắt' : 'để Bật'})`;
+      } else if (isModeOn) {
+        // Bật: ĐÈN XANH
+        gstIndicator.className = 'gst-lamp on';
+        gstIndicator.title = 'Cử chỉ: BẬT (Nắm tay để điều khiển gimbal | Space để tắt)';
+        cv.style.cursor = 'not-allowed';
+      } else {
+        // Tắt: ĐÈN XÁM
+        gstIndicator.className = 'gst-lamp off';
+        gstIndicator.title = 'Cử chỉ: TẮT (Xòe tay 2s để bật)';
+        cv.style.cursor = 'crosshair';
+      }
+    }
+
+    // Quản lý hiển thị card khuôn mặt đã xác định (Chống update giật/đè lặp liên tục)
+    // Map: nameKey -> { name, age, gender, emotion, lastSeen, lastImgUpdate, domNode }
+    const activeFaceCards = new Map();
+    const FACE_TIMEOUT_MS = 2000; // 2.0 giây timeout sau khi mất khuôn mặt
+
+    // Cập nhật thẻ nhận diện: Sắp xếp theo cột bên phải, cập nhật tại chỗ không nhấp nháy
+    function updateFaceCard(f) {
+      const now = Date.now();
+      const currentMatched = [];
+      const seenNames = new Set();
+
+      if (f) {
+        const list = f.faces || (f.name ? [f] : []);
+        for (const item of list) {
+          if (item && item.matched && item.name && !seenNames.has(item.name)) {
+            seenNames.add(item.name);
+            currentMatched.push(item);
+          }
+        }
+      }
+
+      // 1. Duyệt qua các khuôn mặt hiện diện trong khung hình
+      for (const item of currentMatched) {
+        const nameKey = item.name;
+        const cropId = (item.crop_id !== undefined) ? item.crop_id : 0;
+
+        if (activeFaceCards.has(nameKey)) {
+          // Khuôn mặt ĐÃ TỒN TẠI: Cập nhật tại chỗ (IN-PLACE), KHÔNG tạo lại DOM
+          const entry = activeFaceCards.get(nameKey);
+          entry.lastSeen = now;
+
+          // Cập nhật các trường thông tin nếu có thay đổi
+          if (entry.emotion !== item.emotion) {
+            entry.emotion = item.emotion;
+            const el = entry.domNode.querySelector('.val-emotion');
+            if (el) el.textContent = item.emotion || '---';
+          }
+          if (entry.age !== item.age) {
+            entry.age = item.age;
+            const el = entry.domNode.querySelector('.val-age');
+            if (el) el.textContent = item.age || '---';
+          }
+          if (entry.gender !== item.gender) {
+            entry.gender = item.gender;
+            const el = entry.domNode.querySelector('.val-gender');
+            if (el) el.textContent = item.gender || '---';
+          }
+
+          // Cập nhật ảnh snapshot định kỳ (mỗi 1.5s tối đa 1 lần để triệt tiêu hoàn toàn nhấp nháy)
+          if (now - entry.lastImgUpdate > 1500) {
+            entry.lastImgUpdate = now;
+            const imgEl = entry.domNode.querySelector('.face-avatar');
+            if (imgEl) {
+              imgEl.src = `/api/face_crop.jpg?id=${cropId}&t=${now}`;
+            }
+          }
+        } else {
+          // Khuôn mặt MỚI: Tạo card DOM mới và thêm vào cột danh sách bên phải
+          const cardEl = document.createElement('div');
+          cardEl.className = 'face-card-item fade-in';
+
+          const nameStr = item.name || 'Người quen';
+          const ageStr = item.age || '---';
+          const genderStr = item.gender || '---';
+          const emotionStr = item.emotion || '---';
+          const homeStr = item.hometown || '---';
+          const phoneStr = item.phone || '---';
+          const infoStr = item.info || item.notes || '---';
+
+          cardEl.innerHTML = `
+            <img class="face-avatar" src="/api/face_crop.jpg?id=${cropId}&t=${now}" alt="Face">
+            <div class="face-info">
+              <div class="face-name">${nameStr}</div>
+              <div class="face-row"><span class="face-label">Tuổi:</span><span class="face-val val-age">${ageStr}</span></div>
+              <div class="face-row"><span class="face-label">Giới tính:</span><span class="face-val val-gender">${genderStr}</span></div>
+              <div class="face-row"><span class="face-label">Cảm xúc:</span><span class="face-val val-emotion">${emotionStr}</span></div>
+              <div class="face-row"><span class="face-label">Quê quán:</span><span class="face-val">${homeStr}</span></div>
+              <div class="face-row"><span class="face-label">SĐT:</span><span class="face-val">${phoneStr}</span></div>
+              <div class="face-row"><span class="face-label">Thông tin:</span><span class="face-val">${infoStr}</span></div>
+            </div>
+          `;
+
+          faceListEl.appendChild(cardEl);
+
+          activeFaceCards.set(nameKey, {
+            name: nameKey,
+            age: item.age,
+            gender: item.gender,
+            emotion: item.emotion,
+            lastSeen: now,
+            lastImgUpdate: now,
+            domNode: cardEl
+          });
+        }
+      }
+
+      // 2. Dọn dẹp các khuôn mặt đã mất dấu quá thời gian timeout (2.0s)
+      for (const [nameKey, entry] of activeFaceCards.entries()) {
+        if (now - entry.lastSeen >= FACE_TIMEOUT_MS) {
+          if (entry.domNode && entry.domNode.parentNode) {
+            entry.domNode.style.opacity = '0';
+            entry.domNode.style.transform = 'translateY(-10px)';
+            const nodeToRemove = entry.domNode;
+            setTimeout(() => {
+              if (nodeToRemove && nodeToRemove.parentNode) {
+                nodeToRemove.parentNode.removeChild(nodeToRemove);
+              }
+            }, 300);
+          }
+          activeFaceCards.delete(nameKey);
+        }
+      }
+    }
+
+    // Timer dọn dẹp định kỳ
+    setInterval(() => {
+      const now = Date.now();
+      for (const [nameKey, entry] of activeFaceCards.entries()) {
+        if (now - entry.lastSeen >= FACE_TIMEOUT_MS) {
+          if (entry.domNode && entry.domNode.parentNode) {
+            entry.domNode.style.opacity = '0';
+            entry.domNode.style.transform = 'translateY(-10px)';
+            const nodeToRemove = entry.domNode;
+            setTimeout(() => {
+              if (nodeToRemove && nodeToRemove.parentNode) {
+                nodeToRemove.parentNode.removeChild(nodeToRemove);
+              }
+            }, 300);
+          }
+          activeFaceCards.delete(nameKey);
+        }
+      }
+    }, 400);
+
+    function connect() {
+      const es = new EventSource('/events');
+      es.onmessage = e => {
+        last = JSON.parse(e.data);
+        updateFaceCard(last.face);
+        updateGestureUI(last.gesture);
+        requestRender();
+      };
+      es.onerror = () => {
+        es.close();
+        faceListEl.innerHTML = '';
+        updateGestureUI(null);
+        setTimeout(connect, 1000);
+      };
+    }
+    connect();
+
+    vid.onerror = () => setTimeout(() => vid.src = '/video?' + Date.now(), 1000);
+
+    // Xử lý sự kiện kéo thả chuột để vẽ box mục tiêu
+    cv.addEventListener('mousedown', e => {
+      if (e.button !== 0) return; // Chỉ xử lý chuột trái
+      // Khi chế độ cử chỉ đang BẬT: KHÔNG cho phép vẽ box tracking thủ công
+      if (last && last.gesture && last.gesture.mode === 'ON') return;
+      const r = cv.getBoundingClientRect();
+      isDrawing = true;
+      startX = e.clientX - r.left;
+      startY = e.clientY - r.top;
+      currX = startX;
+      currY = startY;
+    });
+
+    cv.addEventListener('mousemove', e => {
+      if (!isDrawing) return;
+      if (last && last.gesture && last.gesture.mode === 'ON') {
+        isDrawing = false;
+        requestRender();
+        return;
+      }
+      const r = cv.getBoundingClientRect();
+      currX = Math.max(0, Math.min(cv.width, e.clientX - r.left));
+      currY = Math.max(0, Math.min(cv.height, e.clientY - r.top));
+      requestRender();
+    });
+
+    function finishSelection() {
+      if (!isDrawing) return;
+      isDrawing = false;
+      const rw = Math.abs(currX - startX);
+      const rh = Math.abs(currY - startY);
+
+      // Yêu cầu kéo thả rõ ràng (kích thước tối thiểu 16x16 px, chuẩn như z1Camera_mavlink)
+      // Bỏ qua click nhẹ hoặc vô tình chạm để tuyệt đối không kích hoạt tracking ngoài ý muốn
+      if (rw >= 16 && rh >= 16) {
+        const x1 = Math.min(startX, currX) / cv.width;
+        const y1 = Math.min(startY, currY) / cv.height;
+        const x2 = Math.max(startX, currX) / cv.width;
+        const y2 = Math.max(startY, currY) / cv.height;
+        sendBox(x1, y1, x2, y2);
+      }
+      requestRender();
+    }
+
+    cv.addEventListener('mouseup', finishSelection);
+    cv.addEventListener('mouseleave', () => { isDrawing = false; requestRender(); });
+
+    // Hủy track bằng chuột phải
+    cv.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      // post('/api/cancel');
+      post('/api/space');
+    });
+
+    function sendBox(x1, y1, x2, y2) {
+      x1 = Math.max(0, Math.min(1, x1));
+      y1 = Math.max(0, Math.min(1, y1));
+      x2 = Math.max(0, Math.min(1, x2));
+      y2 = Math.max(0, Math.min(1, y2));
+      fetch(`/api/select_box?x1=${x1.toFixed(4)}&y1=${y1.toFixed(4)}&x2=${x2.toFixed(4)}&y2=${y2.toFixed(4)}`, { method: 'POST' });
+    }
+
+    const post = u => fetch(u, { method: 'POST' });
+    // Nhấn phím Space: Tắt chế độ cử chỉ, dừng tracking thủ công và recenter
+    addEventListener('keydown', e => {
+      if (e.code === 'Space' || e.key === ' ' || e.keyCode === 32) {
+        e.preventDefault();
+        // Cập nhật giao diện phản hồi tức thì
+        if (last && last.gesture) {
+          last.gesture.mode = 'OFF';
+          last.gesture.gesture = 'NONE';
+          last.gesture.hold_sec = 0;
+          last.gesture.progress = 0;
+          updateGestureUI(last.gesture);
+        }
+        if (last && last.trk) {
+          last.trk.state = 'IDLE';
+          delete last.trk.b;
+        }
+        requestRender();
+        post('/api/space');
+      }
+    });
+  </script>
+</body>
+
+</html>
